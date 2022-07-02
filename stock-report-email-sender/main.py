@@ -90,10 +90,11 @@ news_dict = {}
 newsapi = newsapi.NewsApiClient(api_key=NEWS_API_KEY)
 for stocks in STOCKS:    # Here I used the same reasoning I used on other parts of the code
     try:
-        top_headlines = newsapi.get_top_headlines(q=stocks,
-                                                  category='business',
-                                                  language='en',
-                                                  )
+        top_headlines = newsapi.get_top_headlines(
+            q=stocks, 
+            category='business', 
+            language='en',
+        )
         news_dict[stocks] = {
             'Title': top_headlines['articles'][0]['title'],
             'Description': top_headlines['articles'][0]['description'],
