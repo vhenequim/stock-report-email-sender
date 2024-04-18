@@ -1,26 +1,22 @@
 import requests
 import os, sys
 from datetime import datetime, timedelta
-import pandas
+import pandas as pd
 import newsapi
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from email.mime.text import MIMEText
+import matplotlib as plt
 
 
 EMAIL = os.environ['EMAIL']
 EMAIL_PASSWORD = os.environ['EMAIL_PASSWORD']
 NEWS_API_KEY = os.environ['NEWS_API_KEY']
-ALPHA_VANTAGE_API_KEY = os.environ['ALPHA_VANTAGE_API_KEY']
+POLYGON_API_KEY  = os.environ['POLYGON_API_KEY ']
+
 # You need to declare here which stocks you want to receive the reports
-STOCKS = ["IBM", "TSLA", "AAPL", "GOOG", "MSFT", "AMZN", "META"]
-PARAMETERS_ALPHA_VANTAGE = {
-    'function': "TIME_SERIES_INTRADAY",
-    'symbol':"",
-    'interval': "60min",
-    'apikey': ALPHA_VANTAGE_API_KEY,
-}
+STOCKS = ["IBM", "TSLA", "META"]
 
 
 def percentage_maker(difference, opening_price):       # Function to make the percentage a string ex: 38,84%
@@ -38,54 +34,46 @@ def yesterday(frmt='%Y-%m-%d', string=True):   # Function to define yesterday da
 all_stocks = {}         # Declared a dict to squeeze in all the API info inside it
 today_date = datetime.today().strftime('%Y-%m-%d')
 yesterday_date = yesterday()
+from_date = "2023-01-09" 
+to_date = "2023-01-09"  
 
-# Taking data of each one of the companies and putting it on the "all_stocks" dict
+
 for stocks in STOCKS:
-    PARAMETERS_ALPHA_VANTAGE['symbol'] = stocks
-    response = requests.get(url="https://www.alphavantage.co/query", params=PARAMETERS_ALPHA_VANTAGE)
+    response = requests.get(url=f"https://api.polygon.io/v2/aggs/ticker/{stocks}"
+                            "/range/1/hour/2023-01-09/2023-01-09?adjusted=true&sort=asc&limit=120&"
+                            "apiKey=J7zN6s3CTwQ5k44V9TuRVUQoT66HfwJi")
     response.raise_for_status()
     data = response.json()
     all_stocks[stocks] = data
 
 prices_dict = {}    # Definitive dict where the more "formated" data will go in
-# Taking the specific data from each company and separating it into dicts inside the big "prices_dict" dict.
-# You could separate other types of information here, depends on what you want. Pretty easy to change
-for stocks in all_stocks:
-    # For some reason, sometimes there is a KeyError on "Time Series (60min)". I don't know what it is, but I believe
-    # it has something to do with the API json the program is receiving, but I'm not sure as the API is very pro.
+for ticker, stock_data in all_stocks.items():
     try:
-        open_price = float(all_stocks[stocks]["Time Series (60min)"][f"{today_date} 05:00:00"]["1. open"])
-        close_price = float(all_stocks[stocks]["Time Series (60min)"][f"{today_date} 20:00:00"]["4. close"])
+        open_price = float(stock_data["results"][0]["o"])
+        close_price = float(stock_data["results"][0]["c"])
+        lowest_price = float(stock_data["results"][0]["l"])
+        highest_price = float(stock_data["results"][0]["h"])
+        number_of_trans = float(stock_data["results"][0]["n"])
         net_change = round(close_price - open_price, 4)
         percentage_diff = percentage_maker(net_change, open_price)
-        prices_dict[stocks] = {
-            'Opening price': "{:.2f}".format(open_price),  # Tried to make a nice formation, but the email csv
-            'Closing price': "{:.2f}".format(close_price),  # ignores it anyway...
+        prices_dict[ticker] = {
+            'Opening price': "{:.2f}".format(open_price),  
+            'Closing price': "{:.2f}".format(close_price),  
             'Net Change': "{:.2f}".format(net_change),
-            'Percentage': percentage_diff,
+            'Highest price': "{:.2f}".format(highest_price),
+            'Lowest price': "{:.2f}".format(lowest_price),
+            'Number of Transactions': "{:.2f}".format(number_of_trans)
         }
     except KeyError:
-        # On days when the stock is not open, there will be no data to be collected, so no report
-        # The KeyError will be mainly because when you use the "today" variable on the all_stocks dict, there
-        # will be no key to the day "today" because it will be closed!
-        # Plus: if there is a bug for some reason(the one mentioned above) the program will just skip the buggy
-        # stocks. If every stock is buggy, then that's a big problem! But only testing it a lot to know if it will
-        # really bug. From what I tested so far, it is only some totally random stocks that does not have the data
-        print(f"Bug on {stocks}")
+        print(f"Bug on {ticker}")
         pass
 if not prices_dict:
     sys.exit()
 
-
 # Making the csv file that will be sent through email
-prices_data = pandas.DataFrame(prices_dict)
-prices_data = prices_data.transpose()
-prices_data.to_csv("prices_data.csv")
+prices_df = pd.DataFrame(prices_dict).transpose()
+prices_df.to_csv("prices_data.csv")
 
-# Getting the news
-# I thought a little confusing how this API works, so this part of my code is flawed. When I send the email, it
-# sends some HTML stuff and I don't really know why. I will come back later to this code and remake the news part,
-# get more news (three is a good number, if available) and get rid of this bug.
 news_dict = {}
 newsapi = newsapi.NewsApiClient(api_key=NEWS_API_KEY)
 for stocks in STOCKS:    # Here I used the same reasoning I used on other parts of the code
@@ -119,8 +107,6 @@ for stocks in news_dict:
 
 # Sending emails
 msg_body = f"Good Night! Here is your daily stocks report! Annexed is the csv with the Stocks net values changes\nNews section:{news_email}"
-# I first learned how to send emails using with ... as ..., so it felt more natural to use it
-# I don't know if handling the connection before setting up the email is bad practice
 with smtplib.SMTP("smtp.gmail.com") as connection:
     connection.starttls()
     connection.login(EMAIL, EMAIL_PASSWORD)
@@ -131,3 +117,6 @@ with smtplib.SMTP("smtp.gmail.com") as connection:
     with open("prices_data.csv", 'rb') as file: # File is supposed to be on the main directory, so no issues here
         email_msg.attach(MIMEApplication(file.read(), Name="prices_data.csv"))
     connection.sendmail(EMAIL, EMAIL, email_msg.as_string())
+
+
+
